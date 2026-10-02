@@ -1,17 +1,10 @@
 import { z } from "zod";
 import type { AppMetricaClient } from "../client.js";
-import type { ServerAdapter, ToolResult } from "../server.js";
+import type { ServerAdapter } from "../server.js";
+import { ok, err } from "../util.js";
+import { LOGS_TABLES } from "../catalog.generated.js";
 
-function ok(data: unknown): ToolResult {
-  return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
-}
-
-function err(e: unknown): ToolResult {
-  return {
-    isError: true,
-    content: [{ type: "text", text: e instanceof Error ? e.message : String(e) }],
-  };
-}
+const LOGS_TABLE_NAMES = Object.keys(LOGS_TABLES) as [string, ...string[]];
 
 const DEFAULT_EVENT_FIELDS = [
   "event_name",
@@ -71,6 +64,11 @@ async function exportLogs(
   }
 
   if (Array.isArray(raw)) return raw as unknown[];
+  const wrapped = raw as unknown as { data?: unknown };
+  if (wrapped && typeof wrapped === "object") {
+    if (Array.isArray(wrapped.data)) return wrapped.data as unknown[];
+    if (Object.keys(wrapped).length === 0) return []; // empty body (nothing exported)
+  }
   return [raw];
 }
 
@@ -197,6 +195,60 @@ Same async/rate-limit behaviour as export_events: the wrapper re-polls 202 (defa
 
         const rows = await exportLogs(client, "installations", params);
         return ok({ count: rows.length, installations: rows });
+      } catch (e) {
+        return err(e);
+      }
+    }
+  );
+
+  server.tool(
+    "export_logs",
+    `Export raw rows from any Logs API table: ${LOGS_TABLE_NAMES.join(", ")}.
+Field names per table come from the official AppMetrica docs; unknown fields are rejected with the list of allowed ones. Default fields = all fields of the table.
+date_from/date_to (YYYY-MM-DD) are required for every table except push_tokens, which takes no dates.
+Same async/rate-limit behaviour as export_events: the wrapper re-polls 202 and honours Retry-After on 429. Run sequentially, start with 1-day windows and select only the fields you need. If exports keep queuing, check get_logs_api_status.`,
+    {
+      app_id: z.number().describe("AppMetrica application ID"),
+      table: z.enum(LOGS_TABLE_NAMES).describe("Logs API table"),
+      date_from: z.string().optional().describe("Start date YYYY-MM-DD (not used for push_tokens)"),
+      date_to: z.string().optional().describe("End date YYYY-MM-DD (not used for push_tokens)"),
+      fields: z.array(z.string()).optional().describe("Fields to return (default: all fields of the table)"),
+      limit: z.number().optional().default(1000).describe("Maximum number of rows to return (default 1000)"),
+    },
+    async (args) => {
+      try {
+        const { app_id, table, date_from, date_to, fields, limit } = args as {
+          app_id: number;
+          table: string;
+          date_from?: string;
+          date_to?: string;
+          fields?: string[];
+          limit?: number;
+        };
+
+        const allowed = LOGS_TABLES[table];
+        const selected = fields && fields.length > 0 ? fields : allowed;
+        const unknown = selected.filter((f) => !allowed.includes(f));
+        if (unknown.length > 0) {
+          return err(`Unknown field(s) for table ${table}: ${unknown.join(", ")}. Allowed: ${allowed.join(", ")}`);
+        }
+
+        const params: Record<string, string | number> = {
+          application_id: app_id,
+          fields: selected.join(","),
+          limit: limit ?? 1000,
+        };
+
+        if (table !== "push_tokens") {
+          if (!date_from || !date_to) {
+            return err(`date_from and date_to are required for table ${table}`);
+          }
+          params.date_since = toDatetime(date_from);
+          params.date_until = toDatetimeEnd(date_to);
+        }
+
+        const rows = await exportLogs(client, table, params);
+        return ok({ table, count: rows.length, rows });
       } catch (e) {
         return err(e);
       }

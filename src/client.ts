@@ -41,10 +41,11 @@ function backoffMs(failureCount: number): number {
 export class AppMetricaClient {
   constructor(private config: Config) {}
 
-  async get<T>(path: string, params?: Record<string, string | number>): Promise<T> {
+  async get<T>(path: string, params?: Record<string, string | number | undefined>): Promise<T> {
     const url = new URL(BASE_URL + path);
     if (params) {
       for (const [key, value] of Object.entries(params)) {
+        if (value === undefined || value === null) continue;
         url.searchParams.set(key, String(value));
       }
     }
@@ -57,10 +58,21 @@ export class AppMetricaClient {
     return this.request<T>("POST", url.toString(), body);
   }
 
+  async put<T>(path: string, body: unknown): Promise<T> {
+    const url = new URL(BASE_URL + path);
+    return this.request<T>("PUT", url.toString(), body);
+  }
+
+  async delete<T>(path: string): Promise<T> {
+    const url = new URL(BASE_URL + path);
+    return this.request<T>("DELETE", url.toString());
+  }
+
   private async request<T>(method: string, url: string, body?: unknown): Promise<T> {
     const deadline = Date.now() + MAX_WAIT_MS;
     let pollCount = 0; // 202 polls — do NOT count against the transient budget
     let transientFailures = 0; // 429 / 5xx / network errors
+    let complexRetries = 0; // sporadic 400 "Запрос слишком сложный" on the Reporting API
 
     const options: RequestInit = {
       method,
@@ -122,7 +134,8 @@ export class AppMetricaClient {
       }
 
       // Rate limit / server error: honor Retry-After, otherwise exponential backoff.
-      if (response.status === 429 || response.status >= 500) {
+      // 5xx is retried for GET only: a POST/PUT/DELETE may already have been applied server-side.
+      if (response.status === 429 || (response.status >= 500 && method === "GET")) {
         transientFailures++;
         const retryAfter = parseRetryAfter(response.headers.get("retry-after"));
         // Never let Retry-After (which can legitimately be 0 / sub-second) drop the
@@ -145,10 +158,20 @@ export class AppMetricaClient {
 
       if (!response.ok) {
         const text = await response.text();
-        throw new Error(`HTTP ${response.status}: ${text}`);
+        // Sporadic Reporting API 400 ("query too complex"): the same query usually passes a
+        // moment later, so retry a couple of times before giving up with a hint.
+        const tooComplex = response.status === 400 && text.includes("Запрос слишком сложный");
+        if (tooComplex && complexRetries < 2) {
+          complexRetries++;
+          logger.warn({ url, complexRetries }, "Reporting API: query too complex, retrying");
+          if (await sleepBounded(2000 * complexRetries)) continue;
+        }
+        const hint = tooComplex ? " Hint: retry, narrow the date range, or pass accuracy (e.g. 0.1)." : "";
+        throw new Error(`HTTP ${response.status}: ${text}${hint}`);
       }
 
-      return (await response.json()) as T;
+      const text = await response.text();
+      return (text ? JSON.parse(text) : {}) as T;
     }
   }
 }

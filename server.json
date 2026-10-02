@@ -1,0 +1,65 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.pavellunev/appmetrica-mcp",
+  "description": "AppMetrica (Yandex) analytics: reports, funnels, segments, dashboards, logs export, push",
+  "version": "0.3.0",
+  "repository": {
+    "url": "https://github.com/pavellunev/app_metrica_mcp",
+    "source": "github"
+  },
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "appmetrica-mcp",
+      "version": "0.3.0",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "APPMETRICA_OAUTH_TOKEN",
+          "description": "Yandex OAuth token with AppMetrica read (and optionally write) scope",
+          "isRequired": true,
+          "isSecret": true,
+          "format": "string"
+        },
+        {
+          "name": "APPMETRICA_ALLOW_WRITE",
+          "description": "Set to \"true\" to enable write tools (funnels, segments, push campaigns, web workspaces)",
+          "isRequired": false,
+          "format": "boolean"
+        },
+        {
+          "name": "APPMETRICA_WORKSPACES_FILE",
+          "description": "Path of the local JSON file with saved dashboard widget sets (default ~/.config/appmetrica-mcp/workspaces.json)",
+          "isRequired": false,
+          "format": "filepath"
+        },
+        {
+          "name": "APPMETRICA_BROWSER_PROFILE",
+          "description": "Chrome profile directory for the experimental web session (default ~/.config/appmetrica-mcp/chrome-profile)",
+          "isRequired": false,
+          "format": "filepath"
+        },
+        {
+          "name": "APPMETRICA_BROWSER_PATH",
+          "description": "Path to a Chrome/Chromium executable for the experimental web session (default: system Google Chrome)",
+          "isRequired": false,
+          "format": "filepath"
+        },
+        {
+          "name": "APPMETRICA_BROWSER_CHANNEL",
+          "description": "Playwright browser channel for the experimental web session (chrome | chromium | msedge; default chrome)",
+          "isRequired": false,
+          "format": "string"
+        },
+        {
+          "name": "APPMETRICA_BROWSER_IDLE_MS",
+          "description": "Idle time after which the headless web session closes Chrome and frees the profile (default 120000)",
+          "isRequired": false,
+          "format": "number"
+        }
+      ]
+    }
+  ]
+}

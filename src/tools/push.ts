@@ -1,18 +1,8 @@
 import { z } from "zod";
 import type { AppMetricaClient } from "../client.js";
 import type { Config } from "../config.js";
-import type { ServerAdapter, ToolResult } from "../server.js";
-
-function ok(data: unknown): ToolResult {
-  return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
-}
-
-function err(e: unknown): ToolResult {
-  return {
-    isError: true,
-    content: [{ type: "text", text: e instanceof Error ? e.message : String(e) }],
-  };
-}
+import type { ServerAdapter } from "../server.js";
+import { ok, err } from "../util.js";
 
 export function registerPushTools(server: ServerAdapter, client: AppMetricaClient, config: Config): void {
   server.tool(
