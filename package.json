@@ -1,7 +1,7 @@
 {
   "name": "appmetrica-mcp",
   "version": "0.3.0",
-  "description": "MCP server for AppMetrica — Yandex mobile analytics platform",
+  "description": "MCP server for AppMetrica (Yandex App Metrica): reports, funnels, segments, dashboards and raw logs for Claude and other AI agents",
   "type": "module",
   "main": "dist/index.js",
   "bin": {
@@ -22,11 +22,15 @@
   },
   "keywords": [
     "mcp",
+    "mcp-server",
+    "model-context-protocol",
     "appmetrica",
+    "app-metrica",
     "yandex",
+    "mobile-analytics",
     "analytics",
     "claude",
-    "model-context-protocol"
+    "ai-agents"
   ],
   "author": "Pavel Lunev",
   "license": "MIT",

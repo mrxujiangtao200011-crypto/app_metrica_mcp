@@ -1,4 +1,4 @@
-# AppMetrica MCP
+# AppMetrica MCP — Yandex App Metrica MCP server for Claude and AI agents
 
 [![npm version](https://img.shields.io/npm/v/appmetrica-mcp)](https://www.npmjs.com/package/appmetrica-mcp)
 [![license](https://img.shields.io/npm/l/appmetrica-mcp)](LICENSE)
@@ -8,6 +8,18 @@
 MCP server for [AppMetrica](https://appmetrica.yandex.com) — Yandex's mobile analytics platform. Gives Claude direct access to your app's analytics: reports, funnels, dashboards, raw event logs, crash data, and push notification campaigns — and can create funnels and segments in AppMetrica itself.
 
 > **Update 0.3.0 (October 2026).** The server now *builds* analytics in AppMetrica, not only reads it: saved funnels and segments through the Management API, and real workspaces/dashboards through an experimental logged-in Chrome session (`web_*` tools, one-time `npx appmetrica-mcp login`). Also new: time series (`get_report_bytime`), a docs-derived catalogue of 197 metrics, all 13 Logs API tables, `audit_events` and the `analytics_setup` workflow prompt. Full list in [CHANGELOG.md](CHANGELOG.md).
+
+## Why
+
+AppMetrica keeps mobile product analytics (users, sessions, events, funnels, retention, revenue, crashes) behind a web UI and several HTTP APIs. This MCP server puts all of it behind one set of tools, so an AI agent such as Claude can answer and act on questions like:
+
+- "How did DAU, new users and crash-free sessions change this week?"
+- "Build a funnel from first launch to purchase and save it in AppMetrica."
+- "Which events does the app send, which ones are dead, and what is missing for a registration funnel?"
+- "Create a workspace with audience, revenue and funnel widgets for the marketing team."
+- "Export raw purchase events for September and compare countries."
+
+It works with Claude Code, Claude Desktop and any other MCP client, and is listed in the [official MCP Registry](https://registry.modelcontextprotocol.io) as `io.github.pavellunev/appmetrica-mcp`.
 
 ## Features
 
