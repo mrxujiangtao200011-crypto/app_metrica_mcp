@@ -1,4 +1,4 @@
-# appmetrica-mcp
+# AppMetrica MCP
 
 [![npm version](https://img.shields.io/npm/v/appmetrica-mcp)](https://www.npmjs.com/package/appmetrica-mcp)
 [![license](https://img.shields.io/npm/l/appmetrica-mcp)](LICENSE)
