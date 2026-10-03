@@ -1,16 +1,20 @@
 // `appmetrica-mcp auth`: friendly token acquisition — Yandex OAuth authorization-code flow with
-// PKCE (no client secret), a loopback callback server and the system browser. The user only
-// clicks "Разрешить" in the browser; the token lands in ~/.config/appmetrica-mcp/credentials.json
-// (mode 0600) and the MCP server picks it up automatically when APPMETRICA_OAUTH_TOKEN is not set.
-// Fallback without a loopback redirect: Yandex shows the code on oauth.yandex.ru/verification_code
-// and the user pastes it into the terminal.
+// PKCE (no client secret). Default: the wizard opens the consent page in a Chrome window driven by
+// playwright-core (the same profile as the web session, so the user is usually already logged in),
+// the user clicks "Разрешить", Yandex redirects to oauth.yandex.ru/verification_code?code=… and the
+// wizard reads the code straight from the page — nothing to copy, no redirect URI to register.
+// Fallbacks: `--manual` (system browser + paste the code), `--loopback` (local callback server, for
+// your own OAuth app that registers http://127.0.0.1:<port>/callback). The token lands in
+// ~/.config/appmetrica-mcp/credentials.json (mode 0600); the MCP server picks it up automatically
+// when APPMETRICA_OAUTH_TOKEN is not set. Yandex tokens live about a year; refresh needs the app's
+// client_secret (optional APPMETRICA_OAUTH_CLIENT_SECRET), otherwise just re-run `auth`.
 import { createHash, randomBytes } from "node:crypto";
 import { promises as fs } from "node:fs";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
-import readline from "node:readline";
+import readline from "node:readline/promises";
 
 export const OAUTH_AUTHORIZE_URL = "https://oauth.yandex.ru/authorize";
 export const OAUTH_TOKEN_URL = "https://oauth.yandex.ru/token";
@@ -18,7 +22,7 @@ export const MANUAL_REDIRECT_URI = "https://oauth.yandex.ru/verification_code";
 // Public client id of the appmetrica-mcp OAuth app (ClientID is not a secret). Override with
 // APPMETRICA_OAUTH_CLIENT_ID to use your own app (register http://127.0.0.1:<port>/callback and
 // https://oauth.yandex.ru/verification_code as its callback URIs).
-export const DEFAULT_CLIENT_ID = process.env.APPMETRICA_OAUTH_DEFAULT_CLIENT_ID ?? "";
+export const DEFAULT_CLIENT_ID = "b8a54db2b47846f18a27ce0357b3db4a";
 const DEFAULT_PORT = 8742;
 
 export type StoredCredentials = {
@@ -31,7 +35,7 @@ export type StoredCredentials = {
 };
 
 export function credentialsPath(): string {
-  return process.env.APPMETRICA_CREDENTIALS_FILE ?? path.join(os.homedir(), ".config", "appmetrica-mcp", "credentials.json");
+  return process.env.APPMETRICA_CREDENTIALS_FILE || path.join(os.homedir(), ".config", "appmetrica-mcp", "credentials.json");
 }
 
 export async function loadStoredCredentials(): Promise<StoredCredentials | undefined> {
@@ -47,13 +51,16 @@ export async function loadStoredCredentials(): Promise<StoredCredentials | undef
 export async function saveCredentials(creds: StoredCredentials): Promise<string> {
   const file = credentialsPath();
   await fs.mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
-  await fs.writeFile(file, JSON.stringify(creds, null, 2) + "\n", { mode: 0o600 });
+  // Atomic: the MCP server may read the file at any moment.
+  const tmp = `${file}.${process.pid}.tmp`;
+  await fs.writeFile(tmp, JSON.stringify(creds, null, 2) + "\n", { mode: 0o600 });
+  await fs.rename(tmp, file);
   await fs.chmod(file, 0o600).catch(() => undefined);
   return file;
 }
 
 export function clientId(): string {
-  return process.env.APPMETRICA_OAUTH_CLIENT_ID ?? DEFAULT_CLIENT_ID;
+  return process.env.APPMETRICA_OAUTH_CLIENT_ID || DEFAULT_CLIENT_ID;
 }
 
 function base64url(buf: Buffer): string {
@@ -116,7 +123,7 @@ export async function refreshCredentials(creds: StoredCredentials): Promise<Stor
   if (!creds.refresh_token) return undefined;
   try {
     const tok = await tokenRequest({ grant_type: "refresh_token", refresh_token: creds.refresh_token, client_id: creds.client_id ?? clientId() });
-    const next = toStored(tok, creds.client_id ?? clientId());
+    const next = toStored({ ...tok, refresh_token: tok.refresh_token ?? creds.refresh_token }, creds.client_id ?? clientId());
     await saveCredentials(next);
     return next;
   } catch {
@@ -137,11 +144,12 @@ function openBrowser(url: string): void {
 const DONE_HTML = `<!doctype html><meta charset="utf-8"><title>appmetrica-mcp</title>
 <body style="font:16px/1.5 -apple-system,system-ui,sans-serif;max-width:520px;margin:15vh auto;padding:0 24px;color:#222">
 <h1 style="font-size:22px">Готово ✅</h1><p>appmetrica-mcp получил токен AppMetrica. Эту вкладку можно закрыть и вернуться в терминал.</p></body>`;
+const escapeHtml = (s: string) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c] as string);
 const FAIL_HTML = (msg: string) => `<!doctype html><meta charset="utf-8"><title>appmetrica-mcp</title>
 <body style="font:16px/1.5 -apple-system,system-ui,sans-serif;max-width:520px;margin:15vh auto;padding:0 24px;color:#222">
-<h1 style="font-size:22px">Не получилось</h1><p>${msg}</p><p>Вернитесь в терминал и запустите <code>npx appmetrica-mcp auth</code> ещё раз.</p></body>`;
+<h1 style="font-size:22px">Не получилось</h1><p>${escapeHtml(msg)}</p><p>Вернитесь в терминал и запустите <code>npx appmetrica-mcp auth</code> ещё раз.</p></body>`;
 
-type WizardOptions = { manual?: boolean; port?: number; scope?: string; log?: (line: string) => void; timeoutMs?: number };
+type WizardOptions = { manual?: boolean; loopback?: boolean; port?: number; scope?: string; log?: (line: string) => void; timeoutMs?: number };
 
 // Loopback flow: local http server on 127.0.0.1:<port> receives ?code=&state=.
 async function loopbackFlow(id: string, opts: WizardOptions): Promise<StoredCredentials> {
@@ -158,6 +166,7 @@ async function loopbackFlow(id: string, opts: WizardOptions): Promise<StoredCred
       reject(new Error("Timed out waiting for the browser authorization (10 minutes)."));
     }, opts.timeoutMs ?? 10 * 60 * 1000);
 
+    let handled = false;
     const server = http.createServer(async (req, res) => {
       const u = new URL(req.url ?? "/", `http://127.0.0.1:${port}`);
       if (u.pathname !== "/callback") {
@@ -167,6 +176,12 @@ async function loopbackFlow(id: string, opts: WizardOptions): Promise<StoredCred
       const code = u.searchParams.get("code");
       const gotState = u.searchParams.get("state");
       const err = u.searchParams.get("error");
+      // Requests that do not carry this run's state are ignored (any page can hit localhost).
+      if (gotState !== state || handled) {
+        res.writeHead(400, { "Content-Type": "text/html; charset=utf-8" }).end(FAIL_HTML("Запрос не относится к текущей авторизации."));
+        return;
+      }
+      handled = true;
       const finish = (html: string, status = 200) => {
         res.writeHead(status, { "Content-Type": "text/html; charset=utf-8" }).end(html);
         clearTimeout(timeout);
@@ -175,11 +190,6 @@ async function loopbackFlow(id: string, opts: WizardOptions): Promise<StoredCred
       if (err || !code) {
         finish(FAIL_HTML(`Яндекс вернул ошибку: ${err ?? "нет кода"} ${u.searchParams.get("error_description") ?? ""}`), 400);
         reject(new Error(`Authorization failed: ${err ?? "no code"} ${u.searchParams.get("error_description") ?? ""}`.trim()));
-        return;
-      }
-      if (gotState !== state) {
-        finish(FAIL_HTML("Несовпадение state — возможная подмена запроса."), 400);
-        reject(new Error("OAuth state mismatch"));
         return;
       }
       try {
@@ -204,7 +214,9 @@ async function loopbackFlow(id: string, opts: WizardOptions): Promise<StoredCred
   });
 }
 
-// Manual flow: Yandex shows the code on its page, the user pastes it here.
+// Manual flow: Yandex shows the code on its page, the user pastes it here. `state` cannot be
+// verified without a redirect; PKCE binds a code issued for this run's challenge to its verifier,
+// which rules out replay of our own codes — pasting a code issued elsewhere remains the user's call.
 async function manualFlow(id: string, opts: WizardOptions): Promise<StoredCredentials> {
   const log = opts.log ?? ((l: string) => console.error(l));
   const { verifier, challenge } = pkcePair();
@@ -212,11 +224,61 @@ async function manualFlow(id: string, opts: WizardOptions): Promise<StoredCreden
   const url = authorizeUrl({ clientId: id, redirectUri: MANUAL_REDIRECT_URI, state, challenge, scope: opts.scope });
   log(`Opening the browser for Yandex authorization…\nIf it does not open, visit:\n${url}\n\nAfter you allow access Yandex shows a confirmation code.`);
   openBrowser(url);
-  const rl = readline.createInterface({ input: process.stdin, output: process.stderr });
-  const code = await new Promise<string>((resolve) => rl.question("Paste the code here: ", (a) => resolve(a.trim())));
-  rl.close();
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout, terminal: false });
+  let code = "";
+  try {
+    code = (await rl.question("Paste the code here: ")).trim();
+  } finally {
+    rl.close();
+  }
   if (!code) throw new Error("No code entered");
   return exchangeCode(code, verifier, MANUAL_REDIRECT_URI, id);
+}
+
+// Default flow: a visible Chrome (playwright-core, shared profile) shows the consent page; after
+// "Разрешить" Yandex lands on verification_code?code=…&state=… which we read from the URL.
+async function browserFlow(id: string, opts: WizardOptions): Promise<StoredCredentials> {
+  const log = opts.log ?? ((l: string) => console.error(l));
+  const { verifier, challenge } = pkcePair();
+  const state = base64url(randomBytes(16));
+  const url = authorizeUrl({ clientId: id, redirectUri: MANUAL_REDIRECT_URI, state, challenge, scope: opts.scope });
+  const { launchContext } = await import("./web/session.js");
+  log("Opening Chrome — log in to Yandex if asked and click «Разрешить»…");
+  const ctx = await launchContext(false);
+  try {
+    // Always a fresh tab: the shared profile may restore the user's own tabs.
+    const page = await ctx.newPage();
+    await page.goto(url, { waitUntil: "domcontentloaded", timeout: 60000 });
+    // Yandex appends ?code=…&state=… (or ?error=…) to the verification_code page URL. Capture the
+    // URL at navigation commit, before any script on the page could rewrite it; only the URL is
+    // trusted — never the page text.
+    let landed: URL | undefined;
+    await page.waitForURL(
+      (u) => {
+        if (u.hostname === "oauth.yandex.ru" && u.pathname.startsWith("/verification_code")) {
+          landed = u;
+          return true;
+        }
+        return false;
+      },
+      { timeout: opts.timeoutMs ?? 10 * 60 * 1000, waitUntil: "commit" }
+    );
+    const params = (landed as URL).searchParams;
+    const err = params.get("error");
+    if (err) {
+      throw new Error(
+        err === "access_denied"
+          ? "Access was declined in the Yandex consent dialog. Run `npx appmetrica-mcp auth` again and click «Разрешить»."
+          : `Yandex returned an error: ${err} ${params.get("error_description") ?? ""}`.trim()
+      );
+    }
+    if (params.get("state") !== state) throw new Error("OAuth state mismatch — the authorization response does not belong to this run.");
+    const code = params.get("code") ?? "";
+    if (!code) throw new Error("Yandex did not return a confirmation code in the URL; run `npx appmetrica-mcp auth --manual`.");
+    return await exchangeCode(code, verifier, MANUAL_REDIRECT_URI, id);
+  } finally {
+    await ctx.close().catch(() => undefined);
+  }
 }
 
 export async function verifyToken(token: string): Promise<{ applications: number }> {
@@ -234,8 +296,8 @@ export async function runAuthWizard(opts: WizardOptions = {}): Promise<{ credent
     throw new Error(
       [
         "No OAuth client id configured.",
-        "Create a Yandex OAuth app once at https://oauth.yandex.ru/client/new (platform «Веб-сервисы», callback URIs",
-        `http://127.0.0.1:${opts.port ?? DEFAULT_PORT}/callback and ${MANUAL_REDIRECT_URI}, access «AppMetrica» read/write),`,
+        "Create a Yandex OAuth app once at https://oauth.yandex.ru/client/new (platform «Веб-сервисы», Redirect URI",
+        `${MANUAL_REDIRECT_URI}; add http://127.0.0.1:${opts.port ?? DEFAULT_PORT}/callback only if you want --loopback; access «AppMetrica» read/write),`,
         "then run: APPMETRICA_OAUTH_CLIENT_ID=<ClientID> npx appmetrica-mcp auth",
       ].join("\n")
     );
@@ -243,16 +305,20 @@ export async function runAuthWizard(opts: WizardOptions = {}): Promise<{ credent
   let creds: StoredCredentials;
   if (opts.manual) {
     creds = await manualFlow(id, opts);
+  } else if (opts.loopback) {
+    creds = await loopbackFlow(id, opts);
   } else {
     try {
-      creds = await loopbackFlow(id, opts);
+      creds = await browserFlow(id, opts);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      if (/busy|EADDRINUSE/i.test(msg) && process.stdin.isTTY) {
+      // Any failure to start/drive Chrome → fall back to the manual flow when a human is present.
+      const launchProblem = /Cannot launch Chrome|already open|Executable doesn't exist|Browser was not found|browserType\.launch|Failed to launch/i.test(msg);
+      if (launchProblem && process.stdin.isTTY) {
         log(`${msg}\nFalling back to the manual code flow.`);
         creds = await manualFlow(id, opts);
       } else {
-        throw e;
+        throw new Error(`${msg}\nTip: \`npx appmetrica-mcp auth --manual\` opens your default browser and lets you paste the code instead.`);
       }
     }
   }

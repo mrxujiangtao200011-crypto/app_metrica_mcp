@@ -1,9 +1,9 @@
 # Changelog
 
-## Unreleased
+## 0.3.1 — 2026-10-03
 
 ### Added
-- `npx appmetrica-mcp auth` — browser-based token setup (Yandex OAuth authorization code + PKCE, loopback callback, `--manual` fallback); credentials stored in `~/.config/appmetrica-mcp/credentials.json` and picked up automatically, so `APPMETRICA_OAUTH_TOKEN` is optional. Offers the web-session login at the end.
+- `npx appmetrica-mcp auth` — one-click token setup: Yandex OAuth authorization code + PKCE with the bundled public OAuth app; a Chrome window (shared web-session profile) shows the consent page and the wizard takes the code from the page URL. Fallbacks `--manual` (paste the code) and `--loopback` (own OAuth app with a local callback). Credentials stored in `~/.config/appmetrica-mcp/credentials.json` (0600) and picked up automatically, so `APPMETRICA_OAUTH_TOKEN` is optional. Offers the web-session login at the end.
 - The server now starts without a token and tells the agent how to get one instead of crashing.
 - MIT LICENSE file, GitHub topics/About, README "Why" section, richer npm keywords.
 

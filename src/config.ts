@@ -12,7 +12,7 @@ export interface Config {
 
 export function loadConfig(): Config {
   const allowWrite = process.env.APPMETRICA_ALLOW_WRITE === "true";
-  const workspacesFile = process.env.APPMETRICA_WORKSPACES_FILE ?? path.join(os.homedir(), ".config", "appmetrica-mcp", "workspaces.json");
+  const workspacesFile = process.env.APPMETRICA_WORKSPACES_FILE || path.join(os.homedir(), ".config", "appmetrica-mcp", "workspaces.json");
   let cached: string | undefined;
   const getToken = async (): Promise<string> => {
     if (process.env.APPMETRICA_OAUTH_TOKEN) return process.env.APPMETRICA_OAUTH_TOKEN;
