@@ -44,48 +44,43 @@ It works with Claude Code, Claude Desktop and any other MCP client, and is liste
 
 ## Getting an OAuth Token
 
-AppMetrica uses Yandex OAuth. Use the **Russian OAuth portal** (`oauth.yandex.ru`) — the international version (`oauth.yandex.com`) does not expose AppMetrica scopes in its UI.
+### Option A — one command (recommended)
 
-### Step 1 — Create an OAuth app
-
-1. Go to [oauth.yandex.ru/client/new](https://oauth.yandex.ru/client/new)
-2. Fill in any **name** (e.g. `AppMetrica MCP`)
-3. Under **Platforms**, select **Web services** and set the Callback URI to:
-   ```
-   https://oauth.yandex.ru/verification_code
-   ```
-4. Under **Доступы (Access)**, find the **AppMetrica** section and enable:
-   - `Чтение данных AppMetrica` — read access (required)
-   - `Запись данных AppMetrica` — write access (optional, needed for push campaigns, funnels and segments)
-5. Click **Создать приложение** and copy the **ClientID**
-
-### Step 2 — Get a token
-
-Open this URL in your browser (replace `CLIENT_ID` with your app's ID):
-
-```
-https://oauth.yandex.ru/authorize?response_type=token&client_id=CLIENT_ID
+```bash
+npx appmetrica-mcp auth
 ```
 
-Log in → authorize the app → copy the `access_token` value from the redirect URL.
+The wizard opens your browser on the Yandex consent page; click **Разрешить** and you are done. The token is saved to `~/.config/appmetrica-mcp/credentials.json` (mode 0600) and the server picks it up automatically — no `APPMETRICA_OAUTH_TOKEN` needed. At the end the wizard offers to log in to the AppMetrica **web session** as well (only needed for the `web_*` workspace tools).
 
-> **Note:** The token does not expire by default. You can revoke it anytime at [passport.yandex.ru/profile/access](https://passport.yandex.ru/profile/access).
+Details:
+- Standard OAuth 2.0 authorization-code flow with PKCE; no client secret is stored anywhere.
+- The browser returns to a local callback (`http://127.0.0.1:8742/callback`, change the port with `APPMETRICA_OAUTH_PORT`). If the port is busy or you work over SSH, run `npx appmetrica-mcp auth --manual`: Yandex shows a code on its page and you paste it into the terminal.
+- To use your own Yandex OAuth app instead of the bundled public ClientID, set `APPMETRICA_OAUTH_CLIENT_ID` (register `http://127.0.0.1:8742/callback` and `https://oauth.yandex.ru/verification_code` as its callback URIs and enable the AppMetrica read/write access).
+- The MCP server itself never opens a browser: if no token is found, tools answer with a short "run `npx appmetrica-mcp auth`" message.
+
+### Option B — paste a token yourself
+
+Use the **Russian OAuth portal** (`oauth.yandex.ru`) — the international version (`oauth.yandex.com`) does not expose AppMetrica scopes in its UI.
+
+1. Go to [oauth.yandex.ru/client/new](https://oauth.yandex.ru/client/new), name the app, choose **Web services** and set the Callback URI to `https://oauth.yandex.ru/verification_code`.
+2. Under **Доступы (Access)** → **AppMetrica** enable `Чтение данных AppMetrica` (required) and `Запись данных AppMetrica` (optional, for write tools). Copy the **ClientID**.
+3. Open `https://oauth.yandex.ru/authorize?response_type=token&client_id=CLIENT_ID`, log in, authorize, copy `access_token` from the redirect URL and pass it as `APPMETRICA_OAUTH_TOKEN`.
+
+> Tokens do not expire by default; revoke them anytime at [passport.yandex.ru/profile/access](https://passport.yandex.ru/profile/access). An env token always wins over the saved credentials file.
 
 ## Installation
 
 ### Claude Code (recommended)
 
 ```bash
-claude mcp add appmetrica \
-  -e APPMETRICA_OAUTH_TOKEN=your_token \
-  -- npx -y appmetrica-mcp
+claude mcp add appmetrica -- npx -y appmetrica-mcp
+npx appmetrica-mcp auth   # one-time browser login (or pass -e APPMETRICA_OAUTH_TOKEN=... instead)
 ```
 
 To enable write operations (push campaigns, creating/updating/deleting funnels and segments):
 
 ```bash
 claude mcp add appmetrica \
-  -e APPMETRICA_OAUTH_TOKEN=your_token \
   -e APPMETRICA_ALLOW_WRITE=true \
   -- npx -y appmetrica-mcp
 ```
@@ -101,7 +96,7 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
       "command": "npx",
       "args": ["-y", "appmetrica-mcp"],
       "env": {
-        "APPMETRICA_OAUTH_TOKEN": "your_token"
+        "APPMETRICA_ALLOW_WRITE": "true"
       }
     }
   }
@@ -121,7 +116,10 @@ npm run build
 
 | Variable | Required | Default | Description |
 |---|---|---|---|
-| `APPMETRICA_OAUTH_TOKEN` | Yes | — | Yandex OAuth token with AppMetrica scope |
+| `APPMETRICA_OAUTH_TOKEN` | No | — | Yandex OAuth token; optional when `npx appmetrica-mcp auth` saved one (env wins) |
+| `APPMETRICA_CREDENTIALS_FILE` | No | `~/.config/appmetrica-mcp/credentials.json` | Where `auth` stores the token |
+| `APPMETRICA_OAUTH_CLIENT_ID` | No | bundled public app | Your own Yandex OAuth app ClientID for `auth` |
+| `APPMETRICA_OAUTH_PORT` | No | `8742` | Loopback port of the `auth` callback |
 | `APPMETRICA_ALLOW_WRITE` | No | `false` | Set to `true` to enable write tools: push campaign creation, funnel and segment create/update/delete |
 | `APPMETRICA_WORKSPACES_FILE` | No | `~/.config/appmetrica-mcp/workspaces.json` | JSON file where local workspaces (saved dashboard widget sets) are stored |
 | `APPMETRICA_BROWSER_PROFILE` | No | `~/.config/appmetrica-mcp/chrome-profile` | Chrome profile directory that holds the Yandex login for the experimental `web_*` tools |

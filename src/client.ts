@@ -74,10 +74,11 @@ export class AppMetricaClient {
     let transientFailures = 0; // 429 / 5xx / network errors
     let complexRetries = 0; // sporadic 400 "Запрос слишком сложный" on the Reporting API
 
+    const token = await this.config.getToken();
     const options: RequestInit = {
       method,
       headers: {
-        Authorization: `OAuth ${this.config.oauthToken}`,
+        Authorization: `OAuth ${token}`,
         "Content-Type": "application/json",
       },
     };
@@ -113,7 +114,7 @@ export class AppMetricaClient {
       }
 
       if (response.status === 401) {
-        throw new Error("Invalid OAuth token");
+        throw new Error("AppMetrica rejected the OAuth token (401). Re-run `npx appmetrica-mcp auth` or check APPMETRICA_OAUTH_TOKEN.");
       }
 
       // Logs API: 202 = data is being prepared. Re-poll the SAME request.

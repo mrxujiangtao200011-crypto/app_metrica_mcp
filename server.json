@@ -18,8 +18,8 @@
       "environmentVariables": [
         {
           "name": "APPMETRICA_OAUTH_TOKEN",
-          "description": "Yandex OAuth token with AppMetrica read (and optionally write) scope",
-          "isRequired": true,
+          "description": "Yandex OAuth token with AppMetrica scope; optional when `npx appmetrica-mcp auth` saved credentials",
+          "isRequired": false,
           "isSecret": true,
           "format": "string"
         },
@@ -58,6 +58,18 @@
           "description": "Idle time after which the headless web session closes Chrome and frees the profile (default 120000)",
           "isRequired": false,
           "format": "number"
+        },
+        {
+          "name": "APPMETRICA_OAUTH_CLIENT_ID",
+          "description": "Your own Yandex OAuth app ClientID for `appmetrica-mcp auth` (default: bundled public app)",
+          "isRequired": false,
+          "format": "string"
+        },
+        {
+          "name": "APPMETRICA_CREDENTIALS_FILE",
+          "description": "Where `appmetrica-mcp auth` stores the token (default ~/.config/appmetrica-mcp/credentials.json)",
+          "isRequired": false,
+          "format": "filepath"
         }
       ]
     }

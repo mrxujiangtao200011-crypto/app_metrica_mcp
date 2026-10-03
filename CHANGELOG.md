@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- `npx appmetrica-mcp auth` — browser-based token setup (Yandex OAuth authorization code + PKCE, loopback callback, `--manual` fallback); credentials stored in `~/.config/appmetrica-mcp/credentials.json` and picked up automatically, so `APPMETRICA_OAUTH_TOKEN` is optional. Offers the web-session login at the end.
+- The server now starts without a token and tells the agent how to get one instead of crashing.
+- MIT LICENSE file, GitHub topics/About, README "Why" section, richer npm keywords.
+
 ## 0.3.0 — 2026-10-03
 
 Major update: the MCP can now build analytics in AppMetrica itself, not only read it.
